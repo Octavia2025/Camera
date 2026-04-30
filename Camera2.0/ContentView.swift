@@ -6,294 +6,101 @@
 //
 
 //  CameraView.swift
-//  Pentomino Block Detector
-//  Detects physical pentomino pieces via camera using Vision + grid-cell matching
- 
-//  CameraView.swift
-//  Pentomino Block Detector
-//  Back camera — place piece flat on table and aim down
+//  Pentomino Block Detector — Color-Based Detection
+//  Point camera at piece on table — detects by color
 
 import SwiftUI
 import AVFoundation
-import Vision
-import simd
+import CoreImage
 
-// MARK: - PENTOMINO DEFINITIONS
-struct PentominoPiece {
+// MARK: - PIECE COLOR DEFINITIONS
+// HSB ranges for each physical piece color
+struct PieceColorRange {
     let name: String
-    let color: Color
-    let grids: [[String]] // 5 rows of 5 chars each ("0"/"1"), multiple rotations
+    let uiColor: Color
+    // Hue range 0–360, Saturation & Brightness 0–1
+    let hueMin: CGFloat
+    let hueMax: CGFloat
+    let satMin: CGFloat
+    let briMin: CGFloat
 }
 
-let allPentominoes: [PentominoPiece] = [
+let pieceColors: [PieceColorRange] = [
+    PieceColorRange(name: "T", uiColor: Color(red: 0.6, green: 0.2, blue: 0.8),
+                    hueMin: 270, hueMax: 310, satMin: 0.4, briMin: 0.3),  // Purple
 
-    // T — top bar + centre stem (4 rotations)
-    PentominoPiece(name: "T", color: Color(red: 0.6, green: 0.2, blue: 0.8), grids: [
-        ["11100",
-         "01000",
-         "01000",
-         "00000",
-         "00000"],
-        ["10000",
-         "11000",
-         "10000",
-         "00000",
-         "00000"],
-        ["01000",
-         "01000",
-         "11100",
-         "00000",
-         "00000"],
-        ["00100",
-         "11100",
-         "00100",
-         "00000",
-         "00000"]
-    ]),
+    PieceColorRange(name: "V", uiColor: .red,
+                    hueMin: 0,   hueMax: 15,  satMin: 0.5, briMin: 0.3),  // Red (also wraps)
 
-    // W — staircase (4 rotations)
-    PentominoPiece(name: "W", color: .orange, grids: [
-        ["10000",
-         "11000",
-         "01100",
-         "00000",
-         "00000"],
-        ["01100",
-         "01000",
-         "11000",
-         "00000",
-         "00000"],
-        ["11000",
-         "01100",
-         "00100",
-         "00000",
-         "00000"],
-        ["00100",
-         "01100",
-         "11000",
-         "00000",
-         "00000"]
-    ]),
+    PieceColorRange(name: "V_wrap", uiColor: .red,
+                    hueMin: 345, hueMax: 360, satMin: 0.5, briMin: 0.3),  // Red wrap-around
 
-    // Z — zigzag (4 rotations including mirror)
-    PentominoPiece(name: "Z", color: .green, grids: [
-        ["11000",
-         "01000",
-         "01100",
-         "00000",
-         "00000"],
-        ["00110",
-         "00100",
-         "11000",
-         "00000",
-         "00000"],
-        ["11000",
-         "01100",
-         "00100",
-         "00000",
-         "00000"],
-        ["00100",
-         "01100",
-         "11000",
-         "00000",
-         "00000"]
-    ]),
+    PieceColorRange(name: "U", uiColor: .pink,
+                    hueMin: 310, hueMax: 345, satMin: 0.25, briMin: 0.5), // Pink
 
-    // L — 4 tall, foot right (4 rotations)
-    PentominoPiece(name: "L", color: .yellow, grids: [
-        ["10000",
-         "10000",
-         "10000",
-         "11000",
-         "00000"],
-        ["11100",
-         "10000",
-         "10000",
-         "00000",
-         "00000"],
-        ["11000",
-         "01000",
-         "01000",
-         "01000",
-         "00000"],
-        ["00100",
-         "00100",
-         "11100",
-         "00000",
-         "00000"]
-    ]),
+    PieceColorRange(name: "F", uiColor: .blue,
+                    hueMin: 200, hueMax: 250, satMin: 0.4, briMin: 0.2),  // Blue
 
-    // U — staple / horseshoe (4 rotations)
-    PentominoPiece(name: "U", color: .pink, grids: [
-        ["10100",
-         "11100",
-         "00000",
-         "00000",
-         "00000"],
-        ["11000",
-         "10000",
-         "11000",
-         "00000",
-         "00000"],
-        ["11100",
-         "10100",
-         "00000",
-         "00000",
-         "00000"],
-        ["01100",
-         "00100",
-         "01100",
-         "00000",
-         "00000"]
-    ]),
+    PieceColorRange(name: "X", uiColor: .teal,
+                    hueMin: 165, hueMax: 200, satMin: 0.4, briMin: 0.2),  // Teal
 
-    // F — offset asymmetric (4 rotations)
-    PentominoPiece(name: "F", color: .blue, grids: [
-        ["01100",
-         "11000",
-         "01000",
-         "00000",
-         "00000"],
-        ["10000",
-         "11000",
-         "01100",
-         "00000",
-         "00000"],
-        ["01000",
-         "11100",
-         "10000",
-         "00000",
-         "00000"],
-        ["00100",
-         "11100",
-         "01000",
-         "00000",
-         "00000"]
-    ]),
+    PieceColorRange(name: "W", uiColor: .orange,
+                    hueMin: 20,  hueMax: 45,  satMin: 0.5, briMin: 0.3),  // Orange
 
-    // V — corner shape (4 rotations)
-    PentominoPiece(name: "V", color: .red, grids: [
-        ["10000",
-         "10000",
-         "11100",
-         "00000",
-         "00000"],
-        ["11100",
-         "10000",
-         "10000",
-         "00000",
-         "00000"],
-        ["11100",
-         "00100",
-         "00100",
-         "00000",
-         "00000"],
-        ["00100",
-         "00100",
-         "11100",
-         "00000",
-         "00000"]
-    ]),
+    PieceColorRange(name: "L", uiColor: .yellow,
+                    hueMin: 45,  hueMax: 75,  satMin: 0.4, briMin: 0.4),  // Yellow
 
-    // X — plus sign (rotationally symmetric)
-    PentominoPiece(name: "X", color: .teal, grids: [
-        ["01000",
-         "11100",
-         "01000",
-         "00000",
-         "00000"]
-    ])
+    PieceColorRange(name: "Z", uiColor: .green,
+                    hueMin: 90,  hueMax: 165, satMin: 0.3, briMin: 0.2),  // Green
 ]
 
-// MARK: - GRID MATCHING ENGINE
-struct PentominoMatcher {
-
-    /// Normalize detected cells into a top-left-anchored 5x5 grid
-    static func normalize(cells: [(Int, Int)]) -> [String] {
-        guard !cells.isEmpty else { return [] }
-        let minR = cells.map { $0.1 }.min()!
-        let minC = cells.map { $0.0 }.min()!
-        let shifted = cells.map { ($0.0 - minC, $0.1 - minR) }
-        var grid = Array(repeating: Array(repeating: "0", count: 5), count: 5)
-        for (c, r) in shifted where r < 5 && c < 5 {
-            grid[r][c] = "1"
+// Match a hue/sat/bri to a piece name
+func matchPieceColor(hue: CGFloat, sat: CGFloat, bri: CGFloat) -> (name: String, color: Color)? {
+    for range in pieceColors {
+        if hue >= range.hueMin && hue <= range.hueMax &&
+           sat >= range.satMin && bri >= range.briMin {
+            // Map "V_wrap" back to V
+            let name = range.name == "V_wrap" ? "V" : range.name
+            return (name, range.uiColor)
         }
-        return grid.map { $0.joined() }
     }
-
-    /// Score how many "1" cells match between two grids
-    static func similarity(_ a: [String], _ b: [String]) -> Int {
-        var matches = 0
-        var totalOnes = 0
-        for (rowA, rowB) in zip(a, b) {
-            for (cA, cB) in zip(rowA, rowB) {
-                if cA == "1" { totalOnes += 1 }
-                if cA == cB && cA == "1" { matches += 1 }
-            }
-        }
-        // Penalise if detected has far more cells than the template
-        return matches
-    }
-
-    /// Returns best matching piece name + color, or nil if no confident match
-    static func match(cells: [(Int, Int)]) -> (name: String, color: Color)? {
-        guard cells.count >= 3 else { return nil }
-        let norm = normalize(cells: cells)
-        var bestScore = 0
-        var bestPiece: PentominoPiece?
-
-        for piece in allPentominoes {
-            for rotation in piece.grids {
-                let score = similarity(norm, rotation)
-                if score > bestScore {
-                    bestScore = score
-                    bestPiece = piece
-                }
-            }
-        }
-        // Need at least 3 cells matching to be confident
-        guard bestScore >= 3, let piece = bestPiece else { return nil }
-        return (piece.name, piece.color)
-    }
+    return nil
 }
 
 // MARK: - MAIN VIEW
 struct CameraView: View {
-    @State private var detectedBox: CGRect = .zero
-    @State private var detectedShape: String = "Scanning..."
+    @State private var detectedPiece: String = "Scanning..."
+    @State private var detectedColor: Color = .white
     @State private var isLocked = false
-    @State private var pieceColor: Color = .white
-    @State private var filledCells: [(Int, Int)] = []
+    @State private var stableFrames = 0
+    @State private var lastPiece = ""
 
     var body: some View {
         ZStack {
-            CameraPreview(
-                box: $detectedBox,
-                shape: $detectedShape,
-                locked: $isLocked,
-                pieceColor: $pieceColor,
-                filledCells: $filledCells
-            )
+            // Camera feed
+            CameraPreview(onColor: { hue, sat, bri in
+                handleColor(hue: hue, sat: sat, bri: bri)
+            })
             .ignoresSafeArea()
 
-            // Aiming box with corner markers
+            // Aiming box
             GeometryReader { geo in
-                let roiSize = min(geo.size.width, geo.size.height) * 0.72
+                let size = min(geo.size.width, geo.size.height) * 0.65
                 let cx = geo.size.width / 2
                 let cy = geo.size.height / 2
-                let half = roiSize / 2
-                let cornerLen: CGFloat = 32
+                let half = size / 2
+                let cLen: CGFloat = 36
                 let lw: CGFloat = 4
 
                 ZStack {
-                    // Dim area outside box
+                    // Dim outside
                     Rectangle()
-                        .fill(Color.black.opacity(0.4))
+                        .fill(Color.black.opacity(0.45))
                         .mask(
                             ZStack {
                                 Rectangle()
                                 Rectangle()
-                                    .frame(width: roiSize, height: roiSize)
+                                    .frame(width: size, height: size)
                                     .position(x: cx, y: cy)
                                     .blendMode(.destinationOut)
                             }
@@ -302,128 +109,140 @@ struct CameraView: View {
 
                     // Corner TL
                     Path { p in
-                        p.move(to: CGPoint(x: cx - half, y: cy - half + cornerLen))
+                        p.move(to: CGPoint(x: cx - half, y: cy - half + cLen))
                         p.addLine(to: CGPoint(x: cx - half, y: cy - half))
-                        p.addLine(to: CGPoint(x: cx - half + cornerLen, y: cy - half))
-                    }.stroke(Color.white, lineWidth: lw)
+                        p.addLine(to: CGPoint(x: cx - half + cLen, y: cy - half))
+                    }.stroke(isLocked ? detectedColor : Color.white, lineWidth: lw)
 
                     // Corner TR
                     Path { p in
-                        p.move(to: CGPoint(x: cx + half - cornerLen, y: cy - half))
+                        p.move(to: CGPoint(x: cx + half - cLen, y: cy - half))
                         p.addLine(to: CGPoint(x: cx + half, y: cy - half))
-                        p.addLine(to: CGPoint(x: cx + half, y: cy - half + cornerLen))
-                    }.stroke(Color.white, lineWidth: lw)
+                        p.addLine(to: CGPoint(x: cx + half, y: cy - half + cLen))
+                    }.stroke(isLocked ? detectedColor : Color.white, lineWidth: lw)
 
                     // Corner BL
                     Path { p in
-                        p.move(to: CGPoint(x: cx - half, y: cy + half - cornerLen))
+                        p.move(to: CGPoint(x: cx - half, y: cy + half - cLen))
                         p.addLine(to: CGPoint(x: cx - half, y: cy + half))
-                        p.addLine(to: CGPoint(x: cx - half + cornerLen, y: cy + half))
-                    }.stroke(Color.white, lineWidth: lw)
+                        p.addLine(to: CGPoint(x: cx - half + cLen, y: cy + half))
+                    }.stroke(isLocked ? detectedColor : Color.white, lineWidth: lw)
 
                     // Corner BR
                     Path { p in
-                        p.move(to: CGPoint(x: cx + half - cornerLen, y: cy + half))
+                        p.move(to: CGPoint(x: cx + half - cLen, y: cy + half))
                         p.addLine(to: CGPoint(x: cx + half, y: cy + half))
-                        p.addLine(to: CGPoint(x: cx + half, y: cy + half - cornerLen))
-                    }.stroke(Color.white, lineWidth: lw)
+                        p.addLine(to: CGPoint(x: cx + half, y: cy + half - cLen))
+                    }.stroke(isLocked ? detectedColor : Color.white, lineWidth: lw)
 
-                    Text("PLACE PIECE ON TABLE & AIM HERE")
+                    // Centre crosshair
+                    Path { p in
+                        p.move(to: CGPoint(x: cx - 12, y: cy))
+                        p.addLine(to: CGPoint(x: cx + 12, y: cy))
+                        p.move(to: CGPoint(x: cx, y: cy - 12))
+                        p.addLine(to: CGPoint(x: cx, y: cy + 12))
+                    }.stroke(Color.white.opacity(0.5), lineWidth: 1.5)
+
+                    // Instruction label
+                    Text("POINT AT PIECE")
                         .font(.system(size: 11, weight: .bold, design: .monospaced))
-                        .foregroundColor(.white.opacity(0.8))
+                        .foregroundColor(.white.opacity(0.75))
                         .position(x: cx, y: cy - half - 14)
                 }
             }
 
-            // Detection overlay
-            GeometryReader { geo in
-                if detectedBox != .zero {
-                    let rect = VNImageRectForNormalizedRect(
-                        detectedBox,
-                        Int(geo.size.width),
-                        Int(geo.size.height)
+            // Piece name badge — shown when detected
+            if detectedPiece != "Scanning..." {
+                VStack {
+                    HStack(spacing: 10) {
+                        Circle()
+                            .fill(detectedColor)
+                            .frame(width: 16, height: 16)
+                            .shadow(color: detectedColor.opacity(0.8), radius: 6)
+
+                        Text("PIECE  \(detectedPiece)")
+                            .font(.system(size: 28, weight: .black, design: .monospaced))
+                            .foregroundColor(.white)
+                    }
+                    .padding(.horizontal, 28)
+                    .padding(.vertical, 14)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(Color.black.opacity(0.75))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .stroke(isLocked ? detectedColor : Color.white.opacity(0.2), lineWidth: 2)
+                            )
                     )
 
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(isLocked ? Color.yellow : pieceColor, lineWidth: 4)
-                            .frame(width: rect.width, height: rect.height)
-
-                        GridOverlay(filledCells: filledCells, color: pieceColor)
-                            .frame(width: rect.width, height: rect.height)
-                            .opacity(0.45)
-
-                        Text(detectedShape)
-                            .font(.system(size: 18, weight: .black, design: .monospaced))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(Color.black.opacity(0.8))
-                            .foregroundColor(isLocked ? .yellow : pieceColor)
-                            .cornerRadius(8)
-                            .offset(y: -(rect.height / 2) - 28)
+                    if isLocked {
+                        Text("✓ LOCKED")
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundColor(detectedColor)
+                            .padding(.top, 4)
                     }
-                    .position(x: rect.midX, y: geo.size.height - rect.midY)
-                    .animation(.easeOut(duration: 0.12), value: detectedBox)
                 }
+                .padding(.top, 60)
+                .frame(maxHeight: .infinity, alignment: .top)
+                .transition(.opacity)
+                .animation(.easeInOut(duration: 0.2), value: detectedPiece)
             }
 
-            // Bottom status bar
+            // Bottom status
             VStack {
                 Spacer()
-                HStack(spacing: 10) {
+                HStack(spacing: 8) {
                     Circle()
-                        .fill(isLocked ? Color.yellow : Color.white.opacity(0.4))
-                        .frame(width: 9, height: 9)
-                    Text(isLocked ? "✓ LOCKED — \(detectedShape)" : detectedShape)
-                        .font(.system(size: 15, weight: .bold, design: .monospaced))
-                        .foregroundColor(isLocked ? .yellow : .white)
+                        .fill(isLocked ? detectedColor : Color.white.opacity(0.35))
+                        .frame(width: 8, height: 8)
+                    Text(isLocked ? "LOCKED — \(detectedPiece)" : detectedPiece)
+                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                        .foregroundColor(isLocked ? detectedColor : .white)
                 }
-                .padding(.horizontal, 22)
-                .padding(.vertical, 12)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 10)
                 .background(Color.black.opacity(0.7))
-                .cornerRadius(14)
+                .cornerRadius(12)
                 .padding(.bottom, 48)
             }
         }
+        .animation(.easeInOut(duration: 0.15), value: isLocked)
     }
-}
 
-// MARK: - GRID OVERLAY
-struct GridOverlay: View {
-    let filledCells: [(Int, Int)]
-    let color: Color
+    // MARK: - COLOR HANDLER
+    private func handleColor(hue: CGFloat, sat: CGFloat, bri: CGFloat) {
+        let result = matchPieceColor(hue: hue, sat: sat, bri: bri)
+        let newPiece = result?.name ?? "Unknown"
 
-    var body: some View {
-        GeometryReader { geo in
-            let cellW = geo.size.width / 5
-            let cellH = geo.size.height / 5
-            ForEach(0..<filledCells.count, id: \.self) { i in
-                let (col, row) = filledCells[i]
-                Rectangle()
-                    .fill(color.opacity(0.5))
-                    .frame(width: cellW - 2, height: cellH - 2)
-                    .position(
-                        x: CGFloat(col) * cellW + cellW / 2,
-                        y: CGFloat(row) * cellH + cellH / 2
-                    )
+        DispatchQueue.main.async {
+            if newPiece == self.lastPiece && newPiece != "Unknown" {
+                self.stableFrames += 1
+            } else {
+                self.stableFrames = 0
+            }
+            self.lastPiece = newPiece
+
+            if newPiece == "Unknown" {
+                self.detectedPiece = "Scanning..."
+                self.detectedColor = .white
+                self.isLocked = false
+            } else {
+                self.detectedPiece = newPiece
+                self.detectedColor = result?.color ?? .white
+                self.isLocked = self.stableFrames > 12
             }
         }
     }
 }
 
-// MARK: - CAMERA WRAPPER
+// MARK: - CAMERA PREVIEW
 struct CameraPreview: UIViewRepresentable {
     typealias UIViewType = PreviewUIView
 
-    @Binding var box: CGRect
-    @Binding var shape: String
-    @Binding var locked: Bool
-    @Binding var pieceColor: Color
-    @Binding var filledCells: [(Int, Int)]
+    var onColor: (CGFloat, CGFloat, CGFloat) -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(box: $box, shape: $shape, locked: $locked,
-                    pieceColor: $pieceColor, filledCells: $filledCells)
+        Coordinator(onColor: onColor)
     }
 
     func makeUIView(context: Context) -> PreviewUIView {
@@ -437,41 +256,27 @@ struct CameraPreview: UIViewRepresentable {
 
     // MARK: - COORDINATOR
     final class Coordinator: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
-        @Binding var box: CGRect
-        @Binding var shape: String
-        @Binding var locked: Bool
-        @Binding var pieceColor: Color
-        @Binding var filledCells: [(Int, Int)]
-
+        var onColor: (CGFloat, CGFloat, CGFloat) -> Void
         let session = AVCaptureSession()
         var previewLayer: AVCaptureVideoPreviewLayer?
+        private var frameCount = 0
 
-        private var lastShape = ""
-        private var stableFrames = 0
-        private let stabilityThreshold = 10
-
-        init(box: Binding<CGRect>, shape: Binding<String>, locked: Binding<Bool>,
-             pieceColor: Binding<Color>, filledCells: Binding<[(Int, Int)]>) {
-            self._box = box
-            self._shape = shape
-            self._locked = locked
-            self._pieceColor = pieceColor
-            self._filledCells = filledCells
+        init(onColor: @escaping (CGFloat, CGFloat, CGFloat) -> Void) {
+            self.onColor = onColor
         }
 
-        // MARK: - CAMERA SETUP (back camera)
         func setupCamera(in view: UIView) {
             guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
                   let input = try? AVCaptureDeviceInput(device: device) else { return }
 
             session.beginConfiguration()
-            session.sessionPreset = .hd1280x720
+            session.sessionPreset = .medium  // Lower res is fine for color sampling
 
             if session.canAddInput(input) { session.addInput(input) }
 
             let output = AVCaptureVideoDataOutput()
             output.videoSettings = [
-                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
             ]
             output.setSampleBufferDelegate(self,
                 queue: DispatchQueue(label: "camera.queue", qos: .userInitiated))
@@ -489,126 +294,68 @@ struct CameraPreview: UIViewRepresentable {
             }
         }
 
-        // MARK: - VISION PROCESSING
         func captureOutput(_ output: AVCaptureOutput,
                            didOutput sampleBuffer: CMSampleBuffer,
                            from connection: AVCaptureConnection) {
 
-            guard let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+            // Sample every 3rd frame for performance
+            frameCount += 1
+            guard frameCount % 3 == 0 else { return }
 
-            // ROI matches the aiming box (centre 72% of frame)
-            let roi = CGRect(x: 0.14, y: 0.14, width: 0.72, height: 0.72)
+            guard let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
-            let contourRequest = VNDetectContoursRequest { [weak self] req, _ in
-                guard let self = self,
-                      let obs = req.results as? [VNContoursObservation] else { return }
+            CVPixelBufferLockBaseAddress(imageBuffer, .readOnly)
+            defer { CVPixelBufferUnlockBaseAddress(imageBuffer, .readOnly) }
 
-                let topContours = obs.first?.topLevelContours ?? []
+            let width = CVPixelBufferGetWidth(imageBuffer)
+            let height = CVPixelBufferGetHeight(imageBuffer)
 
-                // Filter by area — ignore tiny noise and full-frame blobs
-                let filtered = topContours.filter {
-                    let area = self.contourArea($0)
-                    return area > 0.002 && area < 0.5
-                }
+            guard let baseAddress = CVPixelBufferGetBaseAddress(imageBuffer) else { return }
+            let bytesPerRow = CVPixelBufferGetBytesPerRow(imageBuffer)
+            let buffer = baseAddress.assumingMemoryBound(to: UInt8.self)
 
-                // Pick largest contour — the piece
-                guard let best = filtered.max(by: {
-                    self.contourArea($0) < self.contourArea($1)
-                }) else { return }
+            // Sample a 20x20 patch from the centre of the frame
+            // This matches where the aiming box crosshair is
+            let sampleSize = 20
+            let startX = width / 2 - sampleSize / 2
+            let startY = height / 2 - sampleSize / 2
 
-                let points: [simd_float2]
-                do { points = try best.normalizedPoints } catch { return }
-                guard points.count > 10 else { return }
+            var totalR: CGFloat = 0
+            var totalG: CGFloat = 0
+            var totalB: CGFloat = 0
+            var count: CGFloat = 0
 
-                let xs = points.map { CGFloat($0.x) }
-                let ys = points.map { CGFloat($0.y) }
-
-                guard let minX = xs.min(), let maxX = xs.max(),
-                      let minY = ys.min(), let maxY = ys.max() else { return }
-
-                let bboxW = maxX - minX
-                let bboxH = maxY - minY
-
-                guard bboxW > 0.04 && bboxH > 0.04 else { return }
-                guard bboxW < 0.88 && bboxH < 0.88 else { return }
-
-                let rawBox = CGRect(x: minX, y: minY, width: bboxW, height: bboxH)
-
-                // --- GRID CELL DETECTION ---
-                // Split bounding box into 5x5 grid
-                // Count contour points per cell — filled cells form the shape pattern
-                var cellCounts = Array(repeating: Array(repeating: 0, count: 5), count: 5)
-
-                for pt in points {
-                    let normX = (CGFloat(pt.x) - minX) / bboxW
-                    // Flip Y: Vision origin is bottom-left, grids are top-left
-                    let normY = 1.0 - (CGFloat(pt.y) - minY) / bboxH
-                    let col = min(4, max(0, Int(normX * 5)))
-                    let row = min(4, max(0, Int(normY * 5)))
-                    cellCounts[row][col] += 1
-                }
-
-                // A cell is "filled" if it has enough contour points
-                let threshold = max(2, points.count / 35)
-                var filledCells: [(Int, Int)] = []
-                for r in 0..<5 {
-                    for c in 0..<5 {
-                        if cellCounts[r][c] >= threshold {
-                            filledCells.append((c, r))
-                        }
-                    }
-                }
-
-                let match = PentominoMatcher.match(cells: filledCells)
-                let newShape = match?.name ?? "Unknown"
-
-                if newShape == self.lastShape && newShape != "Unknown" {
-                    self.stableFrames += 1
-                } else {
-                    self.stableFrames = 0
-                }
-                self.lastShape = newShape
-                let locked = self.stableFrames > self.stabilityThreshold
-
-                DispatchQueue.main.async {
-                    self.box = rawBox
-                    self.shape = newShape == "Unknown" ? "Scanning..." : (locked ? "\(newShape)" : newShape)
-                    self.locked = locked
-                    self.pieceColor = match?.color ?? .white
-                    self.filledCells = filledCells
+            for y in startY..<(startY + sampleSize) {
+                for x in startX..<(startX + sampleSize) {
+                    let offset = y * bytesPerRow + x * 4
+                    let b = CGFloat(buffer[offset])     / 255.0
+                    let g = CGFloat(buffer[offset + 1]) / 255.0
+                    let r = CGFloat(buffer[offset + 2]) / 255.0
+                    totalR += r
+                    totalG += g
+                    totalB += b
+                    count += 1
                 }
             }
 
-            contourRequest.regionOfInterest = roi
-            contourRequest.contrastAdjustment = 3.0   // Higher contrast for table surfaces
-            contourRequest.detectsDarkOnLight = true   // Dark piece on light table
+            let avgR = totalR / count
+            let avgG = totalG / count
+            let avgB = totalB / count
 
-            do {
-                // .up orientation for iPad held overhead pointing down at table
-                try VNImageRequestHandler(cvPixelBuffer: buffer,
-                                          orientation: .up).perform([contourRequest])
-            } catch {
-                print("Vision error: \(error)")
-            }
-        }
+            // Convert RGB to HSB
+            var hue: CGFloat = 0
+            var sat: CGFloat = 0
+            var bri: CGFloat = 0
+            UIColor(red: avgR, green: avgG, blue: avgB, alpha: 1.0)
+                .getHue(&hue, saturation: &sat, brightness: &bri, alpha: nil)
 
-        // MARK: - CONTOUR AREA (Shoelace formula)
-        func contourArea(_ contour: VNContour) -> Float {
-            let points: [simd_float2]
-            do { points = try contour.normalizedPoints } catch { return 0 }
-            guard points.count > 2 else { return 0 }
-            var area: Float = 0
-            for i in 0..<points.count {
-                let j = (i + 1) % points.count
-                area += points[i].x * points[j].y
-                area -= points[j].x * points[i].y
-            }
-            return abs(area) / 2
+            // Convert hue from 0–1 to 0–360
+            onColor(hue * 360, sat, bri)
         }
     }
 }
 
-// MARK: - PREVIEW UIVIEW (fixes white screen on iPad)
+// MARK: - PREVIEW UIVIEW
 class PreviewUIView: UIView {
     weak var coordinator: CameraPreview.Coordinator?
 
