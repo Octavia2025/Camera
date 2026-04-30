@@ -1,116 +1,102 @@
-//
-//  ContentView.swift
-//  Me
-//
-//  Created by octavia on 7/4/2026.
 import SwiftUI
 import AVFoundation
-import Vision
 import simd
 
-// MARK: - MAIN VIEW
 struct CameraView: View {
-    @State private var detectedBox: CGRect = .zero
-    @State private var detectedShape: String = "Scanning..."
-    @State private var isLocked = false
+    @State private var detections: [DetectedPiece] = []
+    @State private var statusText = "Point the camera at the pieces"
 
     var body: some View {
         ZStack {
             CameraPreview(
-                box: $detectedBox,
-                shape: $detectedShape,
-                locked: $isLocked
+                detections: $detections,
+                statusText: $statusText
             )
             .ignoresSafeArea()
 
-            // ROI indicator
             GeometryReader { geo in
-                let roiSize = min(geo.size.width, geo.size.height) * 0.7
+                let roiSize = min(geo.size.width, geo.size.height) * 0.72
                 RoundedRectangle(cornerRadius: 16)
-                    .stroke(Color.white.opacity(0.3), lineWidth: 1.5)
+                    .stroke(Color.white.opacity(0.35), lineWidth: 2)
                     .frame(width: roiSize, height: roiSize)
                     .position(x: geo.size.width / 2, y: geo.size.height / 2)
             }
 
-            GeometryReader { geo in
-                if detectedBox != .zero {
-                    let rect = VNImageRectForNormalizedRect(
-                        detectedBox,
-                        Int(geo.size.width),
-                        Int(geo.size.height)
-                    )
+            VStack(spacing: 12) {
+                Spacer()
 
-                    let color: Color = {
-                        if isLocked { return .yellow }
-                        switch detectedShape {
-                        case let s where s.contains("Triangle"):  return .orange
-                        case let s where s.contains("Square"):    return .blue
-                        case let s where s.contains("Rectangle"): return .green
-                        default: return .white
-                        }
-                    }()
-
-                    ZStack {
-                        shapeOverlay(for: detectedShape, color: color, size: CGSize(width: rect.width, height: rect.height))
-
-                        Text(detectedShape)
-                            .font(.caption.bold())
-                            .padding(6)
-                            .background(.black.opacity(0.75))
+                if detections.isEmpty {
+                    Text(statusText)
+                        .font(.headline)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(.black.opacity(0.68))
+                        .foregroundColor(.white)
+                        .cornerRadius(12)
+                } else {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(statusText)
+                            .font(.headline)
                             .foregroundColor(.white)
-                            .cornerRadius(6)
-                            .offset(y: -(rect.height / 2) - 24)
+
+                        ForEach(detections) { detection in
+                            HStack(spacing: 10) {
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(detection.displayColor)
+                                    .frame(width: 16, height: 16)
+
+                                Text("\(detection.shapeName) pentomino")
+                                    .foregroundColor(.white)
+                            }
+                        }
                     }
-                    .position(x: rect.midX, y: geo.size.height - rect.midY)
-                    .animation(.easeOut(duration: 0.15), value: detectedBox)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
+                    .background(.black.opacity(0.72))
+                    .cornerRadius(16)
+                    .padding(.horizontal, 20)
                 }
             }
-
-            // Status label
-            VStack {
-                Spacer()
-                Text(isLocked ? "Locked: \(detectedShape)" : detectedShape)
-                    .font(.headline)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(.black.opacity(0.6))
-                    .foregroundColor(isLocked ? .yellow : .white)
-                    .cornerRadius(10)
-                    .padding(.bottom, 40)
-            }
-        }
-    }
-
-    @ViewBuilder
-    func shapeOverlay(for shape: String, color: Color, size: CGSize) -> some View {
-        if shape.contains("Triangle") {
-            TriangleShape().stroke(color, lineWidth: 4).frame(width: size.width, height: size.height)
-        } else {
-            RoundedRectangle(cornerRadius: 10).stroke(color, lineWidth: 4).frame(width: size.width, height: size.height)
+            .padding(.bottom, 36)
         }
     }
 }
 
-// MARK: - TRIANGLE SHAPE
-struct TriangleShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        Path { p in
-            p.move(to: CGPoint(x: rect.midX, y: rect.minY))
-            p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-            p.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
-            p.closeSubpath()
+struct DetectedPiece: Identifiable, Equatable {
+    let id: String
+    let shapeName: String
+    let colorName: String
+
+    var displayColor: Color {
+        switch colorName {
+        case "red":
+            return .red
+        case "orange":
+            return .orange
+        case "yellow":
+            return .yellow
+        case "green":
+            return .green
+        case "teal":
+            return .mint
+        case "blue":
+            return .blue
+        case "purple":
+            return .purple
+        case "pink":
+            return .pink
+        default:
+            return .white
         }
     }
 }
 
-// MARK: - CAMERA WRAPPER
 struct CameraPreview: UIViewRepresentable {
-    @Binding var box: CGRect
-    @Binding var shape: String
-    @Binding var locked: Bool
+    @Binding var detections: [DetectedPiece]
+    @Binding var statusText: String
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(box: $box, shape: $shape, locked: $locked)
+        Coordinator(detections: $detections, statusText: $statusText)
     }
 
     func makeUIView(context: Context) -> UIView {
@@ -123,47 +109,83 @@ struct CameraPreview: UIViewRepresentable {
         context.coordinator.updateFrame(uiView)
     }
 
-    // MARK: - COORDINATOR
     final class Coordinator: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
-        @Binding var box: CGRect
-        @Binding var shape: String
-        @Binding var locked: Bool
+        struct GridPoint: Hashable {
+            let x: Int
+            let y: Int
+        }
+
+        struct GridComponent {
+            let color: ColorProfile
+            let points: Set<GridPoint>
+        }
+
+        struct ColorProfile {
+            let name: String
+            let rgb: SIMD3<Double>
+        }
+
+        @Binding var detections: [DetectedPiece]
+        @Binding var statusText: String
 
         let session = AVCaptureSession()
         var previewLayer: AVCaptureVideoPreviewLayer?
 
-        private var lastShape = ""
-        private var stableFrames = 0
-        private let stabilityThreshold = 10
+        private let roi = CGRect(x: 0.14, y: 0.14, width: 0.72, height: 0.72)
+        private let sampleResolution = 160
+        private let templateResolution = 24
+        private let minimumComponentPixels = 180
+        private let colorProfiles: [ColorProfile] = [
+            ColorProfile(name: "red", rgb: SIMD3(0.84, 0.22, 0.22)),
+            ColorProfile(name: "orange", rgb: SIMD3(0.95, 0.57, 0.23)),
+            ColorProfile(name: "yellow", rgb: SIMD3(0.90, 0.82, 0.20)),
+            ColorProfile(name: "green", rgb: SIMD3(0.47, 0.86, 0.24)),
+            ColorProfile(name: "teal", rgb: SIMD3(0.53, 0.83, 0.78)),
+            ColorProfile(name: "blue", rgb: SIMD3(0.19, 0.45, 0.78)),
+            ColorProfile(name: "purple", rgb: SIMD3(0.51, 0.19, 0.72)),
+            ColorProfile(name: "pink", rgb: SIMD3(0.90, 0.27, 0.59))
+        ]
+        private lazy var pentominoTemplates = Self.makePentominoTemplates(resolution: templateResolution)
 
-        init(box: Binding<CGRect>, shape: Binding<String>, locked: Binding<Bool>) {
-            self._box = box
-            self._shape = shape
-            self._locked = locked
+        init(detections: Binding<[DetectedPiece]>, statusText: Binding<String>) {
+            self._detections = detections
+            self._statusText = statusText
         }
 
-        // MARK: CAMERA SETUP
         func setupCamera(in view: UIView) {
-            guard let device = AVCaptureDevice.default(for: .video),
-                  let input = try? AVCaptureDeviceInput(device: device) else { return }
+            guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front),
+                  let input = try? AVCaptureDeviceInput(device: device) else {
+                return
+            }
 
             session.beginConfiguration()
             session.sessionPreset = .hd1280x720
 
-            if session.canAddInput(input) { session.addInput(input) }
+            if session.canAddInput(input) {
+                session.addInput(input)
+            }
 
             let output = AVCaptureVideoDataOutput()
-            output.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange]
-            output.setSampleBufferDelegate(self, queue: DispatchQueue(label: "camera.queue", qos: .userInitiated))
+            output.videoSettings = [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
+            ]
+            output.alwaysDiscardsLateVideoFrames = true
+            output.setSampleBufferDelegate(
+                self,
+                queue: DispatchQueue(label: "camera.queue", qos: .userInitiated)
+            )
 
-            if session.canAddOutput(output) { session.addOutput(output) }
+            if session.canAddOutput(output) {
+                session.addOutput(output)
+            }
 
             session.commitConfiguration()
 
             let preview = AVCaptureVideoPreviewLayer(session: session)
             preview.videoGravity = .resizeAspectFill
             view.layer.addSublayer(preview)
-            self.previewLayer = preview
+            previewLayer = preview
+            configureVideoConnections()
 
             DispatchQueue.global(qos: .userInitiated).async {
                 self.session.startRunning()
@@ -172,155 +194,386 @@ struct CameraPreview: UIViewRepresentable {
 
         func updateFrame(_ view: UIView) {
             previewLayer?.frame = view.bounds
+            configureVideoConnections()
         }
 
-        // MARK: - VISION PROCESSING
-        func captureOutput(_ output: AVCaptureOutput,
-                           didOutput sampleBuffer: CMSampleBuffer,
-                           from connection: AVCaptureConnection) {
+        private func configureVideoConnections() {
+            guard let orientation = currentVideoOrientation() else { return }
 
+            if let previewConnection = previewLayer?.connection {
+                if previewConnection.isVideoOrientationSupported {
+                    previewConnection.videoOrientation = orientation
+                }
+                if previewConnection.isVideoMirroringSupported {
+                    previewConnection.automaticallyAdjustsVideoMirroring = false
+                    previewConnection.isVideoMirrored = false
+                }
+            }
+
+            for connection in session.connections {
+                if connection.isVideoOrientationSupported {
+                    connection.videoOrientation = orientation
+                }
+                if connection.isVideoMirroringSupported {
+                    connection.automaticallyAdjustsVideoMirroring = false
+                    connection.isVideoMirrored = false
+                }
+            }
+        }
+
+        private func currentVideoOrientation() -> AVCaptureVideoOrientation? {
+            switch UIDevice.current.orientation {
+            case .landscapeLeft:
+                return .landscapeRight
+            case .landscapeRight:
+                return .landscapeLeft
+            case .portraitUpsideDown:
+                return .portraitUpsideDown
+            case .portrait:
+                return .portrait
+            default:
+                return previewLayer?.connection?.videoOrientation ?? .landscapeRight
+            }
+        }
+
+        func captureOutput(
+            _ output: AVCaptureOutput,
+            didOutput sampleBuffer: CMSampleBuffer,
+            from connection: AVCaptureConnection
+        ) {
             guard let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
-            let roi = CGRect(x: 0.15, y: 0.15, width: 0.7, height: 0.7)
-
-            let request = VNDetectContoursRequest { [weak self] req, _ in
-                guard let self = self,
-                      let obs = req.results as? [VNContoursObservation] else { return }
-
-                let topContours = obs.first?.topLevelContours ?? []
-
-                let filtered = topContours.filter {
-                    let area = self.contourArea($0)
-                    return area > 0.002 && area < 0.4
+            let components = extractColorComponents(from: buffer)
+            let detectedPieces = components.compactMap(classifyComponent(_:))
+            let sortedDetections = detectedPieces.sorted {
+                if $0.colorName == $1.colorName {
+                    return $0.shapeName < $1.shapeName
                 }
+                return $0.colorName < $1.colorName
+            }
 
-                guard let best = filtered.max(by: {
-                    self.contourArea($0) < self.contourArea($1)
-                }) else { return }
+            DispatchQueue.main.async {
+                self.detections = sortedDetections
 
-                let points: [simd_float2]
-                do {
-                    points = try best.normalizedPoints
-                } catch {
-                    print("Contour points error: \(error)")
-                    return
-                }
-
-                guard points.count > 10 else { return }
-
-                let xs = points.map { CGFloat($0.x) }
-                let ys = points.map { CGFloat($0.y) }
-
-                guard let minX = xs.min(), let maxX = xs.max(),
-                      let minY = ys.min(), let maxY = ys.max() else { return }
-
-                let bboxW = maxX - minX
-                let bboxH = maxY - minY
-
-                guard bboxW < 0.85 && bboxH < 0.85 else { return }
-                guard bboxW > 0.04 && bboxH > 0.04 else { return }
-
-                let corners = self.approximateCorners(from: points)
-                let newShape = self.classifyShape(corners: corners, points: points)
-
-                guard ["Triangle", "Square", "Rectangle"].contains(newShape) else { return }
-
-                let rawBox = CGRect(x: minX, y: minY, width: bboxW, height: bboxH)
-
-                if newShape == self.lastShape {
-                    self.stableFrames += 1
+                if sortedDetections.isEmpty {
+                    self.statusText = "Searching for pieces"
+                } else if sortedDetections.count == 1 {
+                    self.statusText = "Detected 1 piece"
                 } else {
-                    self.stableFrames = 0
-                }
-                self.lastShape = newShape
-                let locked = self.stableFrames > self.stabilityThreshold
-
-                DispatchQueue.main.async {
-                    self.box = rawBox
-                    self.shape = locked ? "Locked: \(newShape)" : newShape
-                    self.locked = locked
+                    self.statusText = "Detected \(sortedDetections.count) pieces"
                 }
             }
+        }
 
-            request.regionOfInterest = roi
-            request.contrastAdjustment = 2.5
-            request.detectsDarkOnLight = true
+        private func extractColorComponents(from buffer: CVPixelBuffer) -> [GridComponent] {
+            CVPixelBufferLockBaseAddress(buffer, .readOnly)
+            defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
 
-            do {
-                try VNImageRequestHandler(
-                    cvPixelBuffer: buffer,
-                    orientation: .right
-                ).perform([request])
-            } catch {
-                print("Vision error: \(error)")
+            guard let baseAddress = CVPixelBufferGetBaseAddress(buffer) else { return [] }
+
+            let width = CVPixelBufferGetWidth(buffer)
+            let height = CVPixelBufferGetHeight(buffer)
+            let bytesPerRow = CVPixelBufferGetBytesPerRow(buffer)
+            let bytes = baseAddress.assumingMemoryBound(to: UInt8.self)
+
+            let roiMinX = Int(CGFloat(width) * roi.minX)
+            let roiMaxX = Int(CGFloat(width) * (roi.minX + roi.width))
+            let roiMinY = Int(CGFloat(height) * roi.minY)
+            let roiMaxY = Int(CGFloat(height) * (roi.minY + roi.height))
+
+            let roiWidth = max(roiMaxX - roiMinX, 1)
+            let roiHeight = max(roiMaxY - roiMinY, 1)
+
+            var colorGrid = Array(
+                repeating: -1,
+                count: sampleResolution * sampleResolution
+            )
+
+            for sampleY in 0..<sampleResolution {
+                let pixelY = roiMinY + (sampleY * roiHeight / sampleResolution)
+
+                for sampleX in 0..<sampleResolution {
+                    let pixelX = roiMinX + (sampleX * roiWidth / sampleResolution)
+                    let offset = (pixelY * bytesPerRow) + (pixelX * 4)
+
+                    let blue = Double(bytes[offset]) / 255.0
+                    let green = Double(bytes[offset + 1]) / 255.0
+                    let red = Double(bytes[offset + 2]) / 255.0
+
+                    let rgb = SIMD3(red, green, blue)
+                    let index = sampleY * sampleResolution + sampleX
+                    colorGrid[index] = colorIndex(for: rgb)
+                }
+            }
+
+            return connectedComponents(in: colorGrid)
+        }
+
+        private func colorIndex(for rgb: SIMD3<Double>) -> Int {
+            let brightness = max(rgb.x, max(rgb.y, rgb.z))
+            let darkness = min(rgb.x, min(rgb.y, rgb.z))
+            let saturation = brightness - darkness
+
+            guard brightness > 0.18, saturation > 0.12 else {
+                return -1
+            }
+
+            let tableDistance = distance(rgb, SIMD3<Double>(repeating: 0.86))
+            guard tableDistance > 0.16 else {
+                return -1
+            }
+
+            var bestIndex = -1
+            var bestDistance = Double.greatestFiniteMagnitude
+
+            for (index, profile) in colorProfiles.enumerated() {
+                let candidateDistance = distance(rgb, profile.rgb)
+                if candidateDistance < bestDistance {
+                    bestDistance = candidateDistance
+                    bestIndex = index
+                }
+            }
+
+            return bestDistance < 0.34 ? bestIndex : -1
+        }
+
+        private func connectedComponents(in colorGrid: [Int]) -> [GridComponent] {
+            var visited = Array(repeating: false, count: colorGrid.count)
+            var components: [GridComponent] = []
+
+            for y in 0..<sampleResolution {
+                for x in 0..<sampleResolution {
+                    let index = y * sampleResolution + x
+                    let colorIndex = colorGrid[index]
+
+                    guard colorIndex >= 0, !visited[index] else { continue }
+
+                    var stack = [GridPoint(x: x, y: y)]
+                    var points = Set<GridPoint>()
+                    visited[index] = true
+
+                    while let point = stack.popLast() {
+                        points.insert(point)
+
+                        let neighbors = [
+                            GridPoint(x: point.x + 1, y: point.y),
+                            GridPoint(x: point.x - 1, y: point.y),
+                            GridPoint(x: point.x, y: point.y + 1),
+                            GridPoint(x: point.x, y: point.y - 1)
+                        ]
+
+                        for neighbor in neighbors {
+                            guard (0..<sampleResolution).contains(neighbor.x),
+                                  (0..<sampleResolution).contains(neighbor.y) else {
+                                continue
+                            }
+
+                            let neighborIndex = neighbor.y * sampleResolution + neighbor.x
+                            guard !visited[neighborIndex],
+                                  colorGrid[neighborIndex] == colorIndex else {
+                                continue
+                            }
+
+                            visited[neighborIndex] = true
+                            stack.append(neighbor)
+                        }
+                    }
+
+                    guard points.count >= minimumComponentPixels else { continue }
+                    components.append(
+                        GridComponent(color: colorProfiles[colorIndex], points: points)
+                    )
+                }
+            }
+
+            return components
+        }
+
+        private func classifyComponent(_ component: GridComponent) -> DetectedPiece? {
+            let normalizedMask = normalize(points: component.points, to: templateResolution)
+            guard normalizedMask.count > 30 else { return nil }
+
+            var bestShape: String?
+            var bestScore = 0.0
+
+            for (shapeName, variants) in pentominoTemplates {
+                for variant in variants {
+                    let score = intersectionOverUnion(lhs: normalizedMask, rhs: variant)
+                    if score > bestScore {
+                        bestScore = score
+                        bestShape = shapeName
+                    }
+                }
+            }
+
+            guard let shapeName = bestShape, bestScore > 0.58 else {
+                return nil
+            }
+
+            return DetectedPiece(
+                id: "\(component.color.name)-\(shapeName)",
+                shapeName: shapeName,
+                colorName: component.color.name
+            )
+        }
+
+        private func normalize(points: Set<GridPoint>, to resolution: Int) -> Set<GridPoint> {
+            let xs = points.map(\.x)
+            let ys = points.map(\.y)
+
+            guard let minX = xs.min(),
+                  let maxX = xs.max(),
+                  let minY = ys.min(),
+                  let maxY = ys.max() else {
+                return []
+            }
+
+            let width = max(maxX - minX + 1, 1)
+            let height = max(maxY - minY + 1, 1)
+            let localPoints = Set(points.map { GridPoint(x: $0.x - minX, y: $0.y - minY) })
+            let scale = Double(resolution) / Double(max(width, height))
+            let scaledWidth = Double(width) * scale
+            let scaledHeight = Double(height) * scale
+            let xInset = (Double(resolution) - scaledWidth) / 2
+            let yInset = (Double(resolution) - scaledHeight) / 2
+
+            var normalized = Set<GridPoint>()
+
+            for y in 0..<resolution {
+                for x in 0..<resolution {
+                    let sampleX = Double(x) + 0.5
+                    let sampleY = Double(y) + 0.5
+
+                    guard sampleX >= xInset,
+                          sampleX < xInset + scaledWidth,
+                          sampleY >= yInset,
+                          sampleY < yInset + scaledHeight else {
+                        continue
+                    }
+
+                    let localX = (sampleX - xInset) / scale
+                    let localY = (sampleY - yInset) / scale
+                    let sourceX = min(width - 1, max(0, Int(localX.rounded(.down))))
+                    let sourceY = min(height - 1, max(0, Int(localY.rounded(.down))))
+
+                    if localPoints.contains(GridPoint(x: sourceX, y: sourceY)) {
+                        normalized.insert(GridPoint(x: x, y: y))
+                    }
+                }
+            }
+
+            return normalized
+        }
+
+        private func intersectionOverUnion(lhs: Set<GridPoint>, rhs: Set<GridPoint>) -> Double {
+            let intersection = lhs.intersection(rhs).count
+            let union = lhs.union(rhs).count
+            guard union > 0 else { return 0 }
+            return Double(intersection) / Double(union)
+        }
+
+        private static func makePentominoTemplates(resolution: Int) -> [String: [Set<GridPoint>]] {
+            let baseShapes: [String: [GridPoint]] = [
+                "F": [GridPoint(x: 1, y: 0), GridPoint(x: 0, y: 1), GridPoint(x: 1, y: 1), GridPoint(x: 1, y: 2), GridPoint(x: 2, y: 2)],
+                "I": [GridPoint(x: 0, y: 0), GridPoint(x: 1, y: 0), GridPoint(x: 2, y: 0), GridPoint(x: 3, y: 0), GridPoint(x: 4, y: 0)],
+                "L": [GridPoint(x: 0, y: 0), GridPoint(x: 0, y: 1), GridPoint(x: 0, y: 2), GridPoint(x: 0, y: 3), GridPoint(x: 1, y: 3)],
+                "N": [GridPoint(x: 0, y: 0), GridPoint(x: 0, y: 1), GridPoint(x: 1, y: 1), GridPoint(x: 1, y: 2), GridPoint(x: 1, y: 3)],
+                "P": [GridPoint(x: 0, y: 0), GridPoint(x: 1, y: 0), GridPoint(x: 0, y: 1), GridPoint(x: 1, y: 1), GridPoint(x: 0, y: 2)],
+                "T": [GridPoint(x: 0, y: 0), GridPoint(x: 1, y: 0), GridPoint(x: 2, y: 0), GridPoint(x: 1, y: 1), GridPoint(x: 1, y: 2)],
+                "U": [GridPoint(x: 0, y: 0), GridPoint(x: 2, y: 0), GridPoint(x: 0, y: 1), GridPoint(x: 1, y: 1), GridPoint(x: 2, y: 1)],
+                "V": [GridPoint(x: 0, y: 0), GridPoint(x: 0, y: 1), GridPoint(x: 0, y: 2), GridPoint(x: 1, y: 2), GridPoint(x: 2, y: 2)],
+                "W": [GridPoint(x: 0, y: 0), GridPoint(x: 0, y: 1), GridPoint(x: 1, y: 1), GridPoint(x: 1, y: 2), GridPoint(x: 2, y: 2)],
+                "X": [GridPoint(x: 1, y: 0), GridPoint(x: 0, y: 1), GridPoint(x: 1, y: 1), GridPoint(x: 2, y: 1), GridPoint(x: 1, y: 2)],
+                "Y": [GridPoint(x: 0, y: 0), GridPoint(x: 0, y: 1), GridPoint(x: 0, y: 2), GridPoint(x: 0, y: 3), GridPoint(x: 1, y: 1)],
+                "Z": [GridPoint(x: 0, y: 0), GridPoint(x: 1, y: 0), GridPoint(x: 1, y: 1), GridPoint(x: 2, y: 1), GridPoint(x: 3, y: 1)]
+            ]
+
+            return baseShapes.mapValues { cells in
+                transformedVariants(of: cells).map { rasterize(cells: $0, resolution: resolution) }
             }
         }
 
-        // MARK: - CORNER APPROXIMATION
-        func approximateCorners(from points: [simd_float2]) -> Int {
-            guard points.count > 4 else { return points.count }
+        private static func transformedVariants(of cells: [GridPoint]) -> [[GridPoint]] {
+            var variants = Set<[GridPoint]>()
 
-            var corners = 0
-            let count = points.count
-            let windowSize = max(2, count / 30)
+            for mirror in [false, true] {
+                for rotation in 0..<4 {
+                    let transformed = canonicalize(
+                        cells.map { point in
+                            let mirroredX = mirror ? -point.x : point.x
 
-            for i in 0..<count {
-                let prev = points[(i - windowSize + count) % count]
-                let curr = points[i]
-                let next = points[(i + windowSize) % count]
+                            switch rotation {
+                            case 0:
+                                return GridPoint(x: mirroredX, y: point.y)
+                            case 1:
+                                return GridPoint(x: -point.y, y: mirroredX)
+                            case 2:
+                                return GridPoint(x: -mirroredX, y: -point.y)
+                            default:
+                                return GridPoint(x: point.y, y: -mirroredX)
+                            }
+                        }
+                    )
 
-                let v1 = simd_float2(curr.x - prev.x, curr.y - prev.y)
-                let v2 = simd_float2(next.x - curr.x, next.y - curr.y)
-
-                let len1 = simd_length(v1)
-                let len2 = simd_length(v2)
-                guard len1 > 0.001, len2 > 0.001 else { continue }
-
-                let dot = simd_dot(v1 / len1, v2 / len2)
-                let angle = acos(max(-1, min(1, dot))) * (180 / .pi)
-
-                if angle > 40 { corners += 1 }
+                    variants.insert(transformed)
+                }
             }
 
-            return max(3, corners / 4)
+            return Array(variants)
         }
 
-        // MARK: - CONTOUR AREA
-        func contourArea(_ contour: VNContour) -> Float {
-            let points: [simd_float2]
-            do {
-                points = try contour.normalizedPoints
-            } catch {
-                return 0
-            }
-            guard points.count > 2 else { return 0 }
+        private static func canonicalize(_ cells: [GridPoint]) -> [GridPoint] {
+            let minX = cells.map(\.x).min() ?? 0
+            let minY = cells.map(\.y).min() ?? 0
 
-            var area: Float = 0
-            for i in 0..<points.count {
-                let j = (i + 1) % points.count
-                area += points[i].x * points[j].y
-                area -= points[j].x * points[i].y
-            }
-            return abs(area) / 2
+            return cells
+                .map { GridPoint(x: $0.x - minX, y: $0.y - minY) }
+                .sorted {
+                    if $0.y == $1.y {
+                        return $0.x < $1.x
+                    }
+                    return $0.y < $1.y
+                }
         }
 
-        // MARK: - SHAPE CLASSIFICATION
-        func classifyShape(corners: Int, points: [simd_float2]) -> String {
-            let xs = points.map { $0.x }
-            let ys = points.map { $0.y }
-            let w = (xs.max() ?? 1) - (xs.min() ?? 0)
-            let h = (ys.max() ?? 1) - (ys.min() ?? 0)
-            let aspect = w / max(h, 0.0001)
-            let isSquarish = abs(aspect - 1.0) < 0.2
+        private static func rasterize(cells: [GridPoint], resolution: Int) -> Set<GridPoint> {
+            let maxX = cells.map(\.x).max() ?? 0
+            let maxY = cells.map(\.y).max() ?? 0
+            let width = max(maxX + 1, 1)
+            let height = max(maxY + 1, 1)
+            let cellSet = Set(cells)
+            let scale = Double(resolution) / Double(max(width, height))
+            let scaledWidth = Double(width) * scale
+            let scaledHeight = Double(height) * scale
+            let xInset = (Double(resolution) - scaledWidth) / 2
+            let yInset = (Double(resolution) - scaledHeight) / 2
 
-            switch corners {
-            case 3:
-                return "Triangle"
-            case 4:
-                return isSquarish ? "Square" : "Rectangle"
-            default:
-                return "Unknown"
+            var occupied = Set<GridPoint>()
+
+            for y in 0..<resolution {
+                for x in 0..<resolution {
+                    let sampleX = Double(x) + 0.5
+                    let sampleY = Double(y) + 0.5
+
+                    guard sampleX >= xInset,
+                          sampleX < xInset + scaledWidth,
+                          sampleY >= yInset,
+                          sampleY < yInset + scaledHeight else {
+                        continue
+                    }
+
+                    let localX = (sampleX - xInset) / scale
+                    let localY = (sampleY - yInset) / scale
+                    let cellX = min(width - 1, max(0, Int(localX.rounded(.down))))
+                    let cellY = min(height - 1, max(0, Int(localY.rounded(.down))))
+
+                    if cellSet.contains(GridPoint(x: cellX, y: cellY)) {
+                        occupied.insert(GridPoint(x: x, y: y))
+                    }
+                }
             }
+
+            return occupied
         }
     }
 }
