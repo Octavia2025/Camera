@@ -1,37 +1,341 @@
 //
 //  ContentView.swift
-//  Me
+//  Camera2.0
 //
-//  Created by octavia on 7/4/2026.
+//  Created by octavia on 29/4/2026.
+//
+
+//  CameraView.swift
+//  Pentomino Block Detector
+//  Detects physical pentomino pieces via camera using Vision + grid-cell matching
+ 
+//  CameraView.swift
+//  Pentomino Block Detector
+//  Back camera — place piece flat on table and aim down
+
 import SwiftUI
 import AVFoundation
 import Vision
 import simd
+
+// MARK: - PENTOMINO DEFINITIONS
+struct PentominoPiece {
+    let name: String
+    let color: Color
+    let grids: [[String]] // 5 rows of 5 chars each ("0"/"1"), multiple rotations
+}
+
+let allPentominoes: [PentominoPiece] = [
+
+    // T — top bar + centre stem (4 rotations)
+    PentominoPiece(name: "T", color: Color(red: 0.6, green: 0.2, blue: 0.8), grids: [
+        ["11100",
+         "01000",
+         "01000",
+         "00000",
+         "00000"],
+        ["10000",
+         "11000",
+         "10000",
+         "00000",
+         "00000"],
+        ["01000",
+         "01000",
+         "11100",
+         "00000",
+         "00000"],
+        ["00100",
+         "11100",
+         "00100",
+         "00000",
+         "00000"]
+    ]),
+
+    // W — staircase (4 rotations)
+    PentominoPiece(name: "W", color: .orange, grids: [
+        ["10000",
+         "11000",
+         "01100",
+         "00000",
+         "00000"],
+        ["01100",
+         "01000",
+         "11000",
+         "00000",
+         "00000"],
+        ["11000",
+         "01100",
+         "00100",
+         "00000",
+         "00000"],
+        ["00100",
+         "01100",
+         "11000",
+         "00000",
+         "00000"]
+    ]),
+
+    // Z — zigzag (4 rotations including mirror)
+    PentominoPiece(name: "Z", color: .green, grids: [
+        ["11000",
+         "01000",
+         "01100",
+         "00000",
+         "00000"],
+        ["00110",
+         "00100",
+         "11000",
+         "00000",
+         "00000"],
+        ["11000",
+         "01100",
+         "00100",
+         "00000",
+         "00000"],
+        ["00100",
+         "01100",
+         "11000",
+         "00000",
+         "00000"]
+    ]),
+
+    // L — 4 tall, foot right (4 rotations)
+    PentominoPiece(name: "L", color: .yellow, grids: [
+        ["10000",
+         "10000",
+         "10000",
+         "11000",
+         "00000"],
+        ["11100",
+         "10000",
+         "10000",
+         "00000",
+         "00000"],
+        ["11000",
+         "01000",
+         "01000",
+         "01000",
+         "00000"],
+        ["00100",
+         "00100",
+         "11100",
+         "00000",
+         "00000"]
+    ]),
+
+    // U — staple / horseshoe (4 rotations)
+    PentominoPiece(name: "U", color: .pink, grids: [
+        ["10100",
+         "11100",
+         "00000",
+         "00000",
+         "00000"],
+        ["11000",
+         "10000",
+         "11000",
+         "00000",
+         "00000"],
+        ["11100",
+         "10100",
+         "00000",
+         "00000",
+         "00000"],
+        ["01100",
+         "00100",
+         "01100",
+         "00000",
+         "00000"]
+    ]),
+
+    // F — offset asymmetric (4 rotations)
+    PentominoPiece(name: "F", color: .blue, grids: [
+        ["01100",
+         "11000",
+         "01000",
+         "00000",
+         "00000"],
+        ["10000",
+         "11000",
+         "01100",
+         "00000",
+         "00000"],
+        ["01000",
+         "11100",
+         "10000",
+         "00000",
+         "00000"],
+        ["00100",
+         "11100",
+         "01000",
+         "00000",
+         "00000"]
+    ]),
+
+    // V — corner shape (4 rotations)
+    PentominoPiece(name: "V", color: .red, grids: [
+        ["10000",
+         "10000",
+         "11100",
+         "00000",
+         "00000"],
+        ["11100",
+         "10000",
+         "10000",
+         "00000",
+         "00000"],
+        ["11100",
+         "00100",
+         "00100",
+         "00000",
+         "00000"],
+        ["00100",
+         "00100",
+         "11100",
+         "00000",
+         "00000"]
+    ]),
+
+    // X — plus sign (rotationally symmetric)
+    PentominoPiece(name: "X", color: .teal, grids: [
+        ["01000",
+         "11100",
+         "01000",
+         "00000",
+         "00000"]
+    ])
+]
+
+// MARK: - GRID MATCHING ENGINE
+struct PentominoMatcher {
+
+    /// Normalize detected cells into a top-left-anchored 5x5 grid
+    static func normalize(cells: [(Int, Int)]) -> [String] {
+        guard !cells.isEmpty else { return [] }
+        let minR = cells.map { $0.1 }.min()!
+        let minC = cells.map { $0.0 }.min()!
+        let shifted = cells.map { ($0.0 - minC, $0.1 - minR) }
+        var grid = Array(repeating: Array(repeating: "0", count: 5), count: 5)
+        for (c, r) in shifted where r < 5 && c < 5 {
+            grid[r][c] = "1"
+        }
+        return grid.map { $0.joined() }
+    }
+
+    /// Score how many "1" cells match between two grids
+    static func similarity(_ a: [String], _ b: [String]) -> Int {
+        var matches = 0
+        var totalOnes = 0
+        for (rowA, rowB) in zip(a, b) {
+            for (cA, cB) in zip(rowA, rowB) {
+                if cA == "1" { totalOnes += 1 }
+                if cA == cB && cA == "1" { matches += 1 }
+            }
+        }
+        // Penalise if detected has far more cells than the template
+        return matches
+    }
+
+    /// Returns best matching piece name + color, or nil if no confident match
+    static func match(cells: [(Int, Int)]) -> (name: String, color: Color)? {
+        guard cells.count >= 3 else { return nil }
+        let norm = normalize(cells: cells)
+        var bestScore = 0
+        var bestPiece: PentominoPiece?
+
+        for piece in allPentominoes {
+            for rotation in piece.grids {
+                let score = similarity(norm, rotation)
+                if score > bestScore {
+                    bestScore = score
+                    bestPiece = piece
+                }
+            }
+        }
+        // Need at least 3 cells matching to be confident
+        guard bestScore >= 3, let piece = bestPiece else { return nil }
+        return (piece.name, piece.color)
+    }
+}
 
 // MARK: - MAIN VIEW
 struct CameraView: View {
     @State private var detectedBox: CGRect = .zero
     @State private var detectedShape: String = "Scanning..."
     @State private var isLocked = false
+    @State private var pieceColor: Color = .white
+    @State private var filledCells: [(Int, Int)] = []
 
     var body: some View {
         ZStack {
             CameraPreview(
                 box: $detectedBox,
                 shape: $detectedShape,
-                locked: $isLocked
+                locked: $isLocked,
+                pieceColor: $pieceColor,
+                filledCells: $filledCells
             )
             .ignoresSafeArea()
 
-            // ROI indicator
+            // Aiming box with corner markers
             GeometryReader { geo in
-                let roiSize = min(geo.size.width, geo.size.height) * 0.7
-                RoundedRectangle(cornerRadius: 16)
-                    .stroke(Color.white.opacity(0.3), lineWidth: 1.5)
-                    .frame(width: roiSize, height: roiSize)
-                    .position(x: geo.size.width / 2, y: geo.size.height / 2)
+                let roiSize = min(geo.size.width, geo.size.height) * 0.72
+                let cx = geo.size.width / 2
+                let cy = geo.size.height / 2
+                let half = roiSize / 2
+                let cornerLen: CGFloat = 32
+                let lw: CGFloat = 4
+
+                ZStack {
+                    // Dim area outside box
+                    Rectangle()
+                        .fill(Color.black.opacity(0.4))
+                        .mask(
+                            ZStack {
+                                Rectangle()
+                                Rectangle()
+                                    .frame(width: roiSize, height: roiSize)
+                                    .position(x: cx, y: cy)
+                                    .blendMode(.destinationOut)
+                            }
+                            .compositingGroup()
+                        )
+
+                    // Corner TL
+                    Path { p in
+                        p.move(to: CGPoint(x: cx - half, y: cy - half + cornerLen))
+                        p.addLine(to: CGPoint(x: cx - half, y: cy - half))
+                        p.addLine(to: CGPoint(x: cx - half + cornerLen, y: cy - half))
+                    }.stroke(Color.white, lineWidth: lw)
+
+                    // Corner TR
+                    Path { p in
+                        p.move(to: CGPoint(x: cx + half - cornerLen, y: cy - half))
+                        p.addLine(to: CGPoint(x: cx + half, y: cy - half))
+                        p.addLine(to: CGPoint(x: cx + half, y: cy - half + cornerLen))
+                    }.stroke(Color.white, lineWidth: lw)
+
+                    // Corner BL
+                    Path { p in
+                        p.move(to: CGPoint(x: cx - half, y: cy + half - cornerLen))
+                        p.addLine(to: CGPoint(x: cx - half, y: cy + half))
+                        p.addLine(to: CGPoint(x: cx - half + cornerLen, y: cy + half))
+                    }.stroke(Color.white, lineWidth: lw)
+
+                    // Corner BR
+                    Path { p in
+                        p.move(to: CGPoint(x: cx + half - cornerLen, y: cy + half))
+                        p.addLine(to: CGPoint(x: cx + half, y: cy + half))
+                        p.addLine(to: CGPoint(x: cx + half, y: cy + half - cornerLen))
+                    }.stroke(Color.white, lineWidth: lw)
+
+                    Text("PLACE PIECE ON TABLE & AIM HERE")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.8))
+                        .position(x: cx, y: cy - half - 14)
+                }
             }
 
+            // Detection overlay
             GeometryReader { geo in
                 if detectedBox != .zero {
                     let rect = VNImageRectForNormalizedRect(
@@ -40,94 +344,104 @@ struct CameraView: View {
                         Int(geo.size.height)
                     )
 
-                    let color: Color = {
-                        if isLocked { return .yellow }
-                        switch detectedShape {
-                        case let s where s.contains("Triangle"):  return .orange
-                        case let s where s.contains("Square"):    return .blue
-                        case let s where s.contains("Rectangle"): return .green
-                        default: return .white
-                        }
-                    }()
-
                     ZStack {
-                        shapeOverlay(for: detectedShape, color: color, size: CGSize(width: rect.width, height: rect.height))
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(isLocked ? Color.yellow : pieceColor, lineWidth: 4)
+                            .frame(width: rect.width, height: rect.height)
+
+                        GridOverlay(filledCells: filledCells, color: pieceColor)
+                            .frame(width: rect.width, height: rect.height)
+                            .opacity(0.45)
 
                         Text(detectedShape)
-                            .font(.caption.bold())
-                            .padding(6)
-                            .background(.black.opacity(0.75))
-                            .foregroundColor(.white)
-                            .cornerRadius(6)
-                            .offset(y: -(rect.height / 2) - 24)
+                            .font(.system(size: 18, weight: .black, design: .monospaced))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Color.black.opacity(0.8))
+                            .foregroundColor(isLocked ? .yellow : pieceColor)
+                            .cornerRadius(8)
+                            .offset(y: -(rect.height / 2) - 28)
                     }
                     .position(x: rect.midX, y: geo.size.height - rect.midY)
-                    .animation(.easeOut(duration: 0.15), value: detectedBox)
+                    .animation(.easeOut(duration: 0.12), value: detectedBox)
                 }
             }
 
-            // Status label
+            // Bottom status bar
             VStack {
                 Spacer()
-                Text(isLocked ? "Locked: \(detectedShape)" : detectedShape)
-                    .font(.headline)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(.black.opacity(0.6))
-                    .foregroundColor(isLocked ? .yellow : .white)
-                    .cornerRadius(10)
-                    .padding(.bottom, 40)
+                HStack(spacing: 10) {
+                    Circle()
+                        .fill(isLocked ? Color.yellow : Color.white.opacity(0.4))
+                        .frame(width: 9, height: 9)
+                    Text(isLocked ? "✓ LOCKED — \(detectedShape)" : detectedShape)
+                        .font(.system(size: 15, weight: .bold, design: .monospaced))
+                        .foregroundColor(isLocked ? .yellow : .white)
+                }
+                .padding(.horizontal, 22)
+                .padding(.vertical, 12)
+                .background(Color.black.opacity(0.7))
+                .cornerRadius(14)
+                .padding(.bottom, 48)
             }
-        }
-    }
-
-    @ViewBuilder
-    func shapeOverlay(for shape: String, color: Color, size: CGSize) -> some View {
-        if shape.contains("Triangle") {
-            TriangleShape().stroke(color, lineWidth: 4).frame(width: size.width, height: size.height)
-        } else {
-            RoundedRectangle(cornerRadius: 10).stroke(color, lineWidth: 4).frame(width: size.width, height: size.height)
         }
     }
 }
 
-// MARK: - TRIANGLE SHAPE
-struct TriangleShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        Path { p in
-            p.move(to: CGPoint(x: rect.midX, y: rect.minY))
-            p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-            p.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
-            p.closeSubpath()
+// MARK: - GRID OVERLAY
+struct GridOverlay: View {
+    let filledCells: [(Int, Int)]
+    let color: Color
+
+    var body: some View {
+        GeometryReader { geo in
+            let cellW = geo.size.width / 5
+            let cellH = geo.size.height / 5
+            ForEach(0..<filledCells.count, id: \.self) { i in
+                let (col, row) = filledCells[i]
+                Rectangle()
+                    .fill(color.opacity(0.5))
+                    .frame(width: cellW - 2, height: cellH - 2)
+                    .position(
+                        x: CGFloat(col) * cellW + cellW / 2,
+                        y: CGFloat(row) * cellH + cellH / 2
+                    )
+            }
         }
     }
 }
 
 // MARK: - CAMERA WRAPPER
 struct CameraPreview: UIViewRepresentable {
+    typealias UIViewType = PreviewUIView
+
     @Binding var box: CGRect
     @Binding var shape: String
     @Binding var locked: Bool
+    @Binding var pieceColor: Color
+    @Binding var filledCells: [(Int, Int)]
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(box: $box, shape: $shape, locked: $locked)
+        Coordinator(box: $box, shape: $shape, locked: $locked,
+                    pieceColor: $pieceColor, filledCells: $filledCells)
     }
 
-    func makeUIView(context: Context) -> UIView {
-        let view = UIView()
+    func makeUIView(context: Context) -> PreviewUIView {
+        let view = PreviewUIView()
+        view.coordinator = context.coordinator
         context.coordinator.setupCamera(in: view)
         return view
     }
 
-    func updateUIView(_ uiView: UIView, context: Context) {
-        context.coordinator.updateFrame(uiView)
-    }
+    func updateUIView(_ uiView: PreviewUIView, context: Context) { }
 
     // MARK: - COORDINATOR
     final class Coordinator: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         @Binding var box: CGRect
         @Binding var shape: String
         @Binding var locked: Bool
+        @Binding var pieceColor: Color
+        @Binding var filledCells: [(Int, Int)]
 
         let session = AVCaptureSession()
         var previewLayer: AVCaptureVideoPreviewLayer?
@@ -136,15 +450,18 @@ struct CameraPreview: UIViewRepresentable {
         private var stableFrames = 0
         private let stabilityThreshold = 10
 
-        init(box: Binding<CGRect>, shape: Binding<String>, locked: Binding<Bool>) {
+        init(box: Binding<CGRect>, shape: Binding<String>, locked: Binding<Bool>,
+             pieceColor: Binding<Color>, filledCells: Binding<[(Int, Int)]>) {
             self._box = box
             self._shape = shape
             self._locked = locked
+            self._pieceColor = pieceColor
+            self._filledCells = filledCells
         }
 
-        // MARK: CAMERA SETUP
+        // MARK: - CAMERA SETUP (back camera)
         func setupCamera(in view: UIView) {
-            guard let device = AVCaptureDevice.default(for: .video),
+            guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
                   let input = try? AVCaptureDeviceInput(device: device) else { return }
 
             session.beginConfiguration()
@@ -153,11 +470,13 @@ struct CameraPreview: UIViewRepresentable {
             if session.canAddInput(input) { session.addInput(input) }
 
             let output = AVCaptureVideoDataOutput()
-            output.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange]
-            output.setSampleBufferDelegate(self, queue: DispatchQueue(label: "camera.queue", qos: .userInitiated))
+            output.videoSettings = [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
+            ]
+            output.setSampleBufferDelegate(self,
+                queue: DispatchQueue(label: "camera.queue", qos: .userInitiated))
 
             if session.canAddOutput(output) { session.addOutput(output) }
-
             session.commitConfiguration()
 
             let preview = AVCaptureVideoPreviewLayer(session: session)
@@ -170,10 +489,6 @@ struct CameraPreview: UIViewRepresentable {
             }
         }
 
-        func updateFrame(_ view: UIView) {
-            previewLayer?.frame = view.bounds
-        }
-
         // MARK: - VISION PROCESSING
         func captureOutput(_ output: AVCaptureOutput,
                            didOutput sampleBuffer: CMSampleBuffer,
@@ -181,31 +496,28 @@ struct CameraPreview: UIViewRepresentable {
 
             guard let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
-            let roi = CGRect(x: 0.15, y: 0.15, width: 0.7, height: 0.7)
+            // ROI matches the aiming box (centre 72% of frame)
+            let roi = CGRect(x: 0.14, y: 0.14, width: 0.72, height: 0.72)
 
-            let request = VNDetectContoursRequest { [weak self] req, _ in
+            let contourRequest = VNDetectContoursRequest { [weak self] req, _ in
                 guard let self = self,
                       let obs = req.results as? [VNContoursObservation] else { return }
 
                 let topContours = obs.first?.topLevelContours ?? []
 
+                // Filter by area — ignore tiny noise and full-frame blobs
                 let filtered = topContours.filter {
                     let area = self.contourArea($0)
-                    return area > 0.002 && area < 0.4
+                    return area > 0.002 && area < 0.5
                 }
 
+                // Pick largest contour — the piece
                 guard let best = filtered.max(by: {
                     self.contourArea($0) < self.contourArea($1)
                 }) else { return }
 
                 let points: [simd_float2]
-                do {
-                    points = try best.normalizedPoints
-                } catch {
-                    print("Contour points error: \(error)")
-                    return
-                }
-
+                do { points = try best.normalizedPoints } catch { return }
                 guard points.count > 10 else { return }
 
                 let xs = points.map { CGFloat($0.x) }
@@ -217,17 +529,40 @@ struct CameraPreview: UIViewRepresentable {
                 let bboxW = maxX - minX
                 let bboxH = maxY - minY
 
-                guard bboxW < 0.85 && bboxH < 0.85 else { return }
                 guard bboxW > 0.04 && bboxH > 0.04 else { return }
-
-                let corners = self.approximateCorners(from: points)
-                let newShape = self.classifyShape(corners: corners, points: points)
-
-                guard ["Triangle", "Square", "Rectangle"].contains(newShape) else { return }
+                guard bboxW < 0.88 && bboxH < 0.88 else { return }
 
                 let rawBox = CGRect(x: minX, y: minY, width: bboxW, height: bboxH)
 
-                if newShape == self.lastShape {
+                // --- GRID CELL DETECTION ---
+                // Split bounding box into 5x5 grid
+                // Count contour points per cell — filled cells form the shape pattern
+                var cellCounts = Array(repeating: Array(repeating: 0, count: 5), count: 5)
+
+                for pt in points {
+                    let normX = (CGFloat(pt.x) - minX) / bboxW
+                    // Flip Y: Vision origin is bottom-left, grids are top-left
+                    let normY = 1.0 - (CGFloat(pt.y) - minY) / bboxH
+                    let col = min(4, max(0, Int(normX * 5)))
+                    let row = min(4, max(0, Int(normY * 5)))
+                    cellCounts[row][col] += 1
+                }
+
+                // A cell is "filled" if it has enough contour points
+                let threshold = max(2, points.count / 35)
+                var filledCells: [(Int, Int)] = []
+                for r in 0..<5 {
+                    for c in 0..<5 {
+                        if cellCounts[r][c] >= threshold {
+                            filledCells.append((c, r))
+                        }
+                    }
+                }
+
+                let match = PentominoMatcher.match(cells: filledCells)
+                let newShape = match?.name ?? "Unknown"
+
+                if newShape == self.lastShape && newShape != "Unknown" {
                     self.stableFrames += 1
                 } else {
                     self.stableFrames = 0
@@ -237,64 +572,31 @@ struct CameraPreview: UIViewRepresentable {
 
                 DispatchQueue.main.async {
                     self.box = rawBox
-                    self.shape = locked ? "Locked: \(newShape)" : newShape
+                    self.shape = newShape == "Unknown" ? "Scanning..." : (locked ? "\(newShape)" : newShape)
                     self.locked = locked
+                    self.pieceColor = match?.color ?? .white
+                    self.filledCells = filledCells
                 }
             }
 
-            request.regionOfInterest = roi
-            request.contrastAdjustment = 2.5
-            request.detectsDarkOnLight = true
+            contourRequest.regionOfInterest = roi
+            contourRequest.contrastAdjustment = 3.0   // Higher contrast for table surfaces
+            contourRequest.detectsDarkOnLight = true   // Dark piece on light table
 
             do {
-                try VNImageRequestHandler(
-                    cvPixelBuffer: buffer,
-                    orientation: .right
-                ).perform([request])
+                // .up orientation for iPad held overhead pointing down at table
+                try VNImageRequestHandler(cvPixelBuffer: buffer,
+                                          orientation: .up).perform([contourRequest])
             } catch {
                 print("Vision error: \(error)")
             }
         }
 
-        // MARK: - CORNER APPROXIMATION
-        func approximateCorners(from points: [simd_float2]) -> Int {
-            guard points.count > 4 else { return points.count }
-
-            var corners = 0
-            let count = points.count
-            let windowSize = max(2, count / 30)
-
-            for i in 0..<count {
-                let prev = points[(i - windowSize + count) % count]
-                let curr = points[i]
-                let next = points[(i + windowSize) % count]
-
-                let v1 = simd_float2(curr.x - prev.x, curr.y - prev.y)
-                let v2 = simd_float2(next.x - curr.x, next.y - curr.y)
-
-                let len1 = simd_length(v1)
-                let len2 = simd_length(v2)
-                guard len1 > 0.001, len2 > 0.001 else { continue }
-
-                let dot = simd_dot(v1 / len1, v2 / len2)
-                let angle = acos(max(-1, min(1, dot))) * (180 / .pi)
-
-                if angle > 40 { corners += 1 }
-            }
-
-            return max(3, corners / 4)
-        }
-
-        // MARK: - CONTOUR AREA
+        // MARK: - CONTOUR AREA (Shoelace formula)
         func contourArea(_ contour: VNContour) -> Float {
             let points: [simd_float2]
-            do {
-                points = try contour.normalizedPoints
-            } catch {
-                return 0
-            }
+            do { points = try contour.normalizedPoints } catch { return 0 }
             guard points.count > 2 else { return 0 }
-
             var area: Float = 0
             for i in 0..<points.count {
                 let j = (i + 1) % points.count
@@ -303,25 +605,16 @@ struct CameraPreview: UIViewRepresentable {
             }
             return abs(area) / 2
         }
+    }
+}
 
-        // MARK: - SHAPE CLASSIFICATION
-        func classifyShape(corners: Int, points: [simd_float2]) -> String {
-            let xs = points.map { $0.x }
-            let ys = points.map { $0.y }
-            let w = (xs.max() ?? 1) - (xs.min() ?? 0)
-            let h = (ys.max() ?? 1) - (ys.min() ?? 0)
-            let aspect = w / max(h, 0.0001)
-            let isSquarish = abs(aspect - 1.0) < 0.2
+// MARK: - PREVIEW UIVIEW (fixes white screen on iPad)
+class PreviewUIView: UIView {
+    weak var coordinator: CameraPreview.Coordinator?
 
-            switch corners {
-            case 3:
-                return "Triangle"
-            case 4:
-                return isSquarish ? "Square" : "Rectangle"
-            default:
-                return "Unknown"
-            }
-        }
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        coordinator?.previewLayer?.frame = bounds
     }
 }
 
