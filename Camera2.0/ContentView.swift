@@ -56,6 +56,10 @@ struct CameraView: View {
                     .cornerRadius(16)
                     .padding(.horizontal, 20)
                 }
+                .padding(.top, 60)
+                .frame(maxHeight: .infinity, alignment: .top)
+                .transition(.opacity)
+                .animation(.easeInOut(duration: 0.2), value: detectedPiece)
             }
             .padding(.bottom, 36)
         }
@@ -99,15 +103,14 @@ struct CameraPreview: UIViewRepresentable {
         Coordinator(detections: $detections, statusText: $statusText)
     }
 
-    func makeUIView(context: Context) -> UIView {
-        let view = UIView()
+    func makeUIView(context: Context) -> PreviewUIView {
+        let view = PreviewUIView()
+        view.coordinator = context.coordinator
         context.coordinator.setupCamera(in: view)
         return view
     }
 
-    func updateUIView(_ uiView: UIView, context: Context) {
-        context.coordinator.updateFrame(uiView)
-    }
+    func updateUIView(_ uiView: PreviewUIView, context: Context) { }
 
     final class Coordinator: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         struct GridPoint: Hashable {
@@ -130,6 +133,7 @@ struct CameraPreview: UIViewRepresentable {
 
         let session = AVCaptureSession()
         var previewLayer: AVCaptureVideoPreviewLayer?
+        private var frameCount = 0
 
         private let roi = CGRect(x: 0.14, y: 0.14, width: 0.72, height: 0.72)
         private let sampleResolution = 160
@@ -159,7 +163,7 @@ struct CameraPreview: UIViewRepresentable {
             }
 
             session.beginConfiguration()
-            session.sessionPreset = .hd1280x720
+            session.sessionPreset = .medium  // Lower res is fine for color sampling
 
             if session.canAddInput(input) {
                 session.addInput(input)
@@ -464,6 +468,8 @@ struct CameraPreview: UIViewRepresentable {
 
             return normalized
         }
+    }
+}
 
         private func intersectionOverUnion(lhs: Set<GridPoint>, rhs: Set<GridPoint>) -> Double {
             let intersection = lhs.intersection(rhs).count
