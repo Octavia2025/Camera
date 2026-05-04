@@ -198,11 +198,11 @@ struct CameraPreview: UIViewRepresentable {
         }
 
         private func configureVideoConnections() {
-            guard let orientation = currentVideoOrientation() else { return }
+            guard let rotationAngle = currentVideoRotationAngle() else { return }
 
             if let previewConnection = previewLayer?.connection {
-                if previewConnection.isVideoOrientationSupported {
-                    previewConnection.videoOrientation = orientation
+                if previewConnection.isVideoRotationAngleSupported(rotationAngle) {
+                    previewConnection.videoRotationAngle = rotationAngle
                 }
                 if previewConnection.isVideoMirroringSupported {
                     previewConnection.automaticallyAdjustsVideoMirroring = false
@@ -211,8 +211,8 @@ struct CameraPreview: UIViewRepresentable {
             }
 
             for connection in session.connections {
-                if connection.isVideoOrientationSupported {
-                    connection.videoOrientation = orientation
+                if connection.isVideoRotationAngleSupported(rotationAngle) {
+                    connection.videoRotationAngle = rotationAngle
                 }
                 if connection.isVideoMirroringSupported {
                     connection.automaticallyAdjustsVideoMirroring = false
@@ -221,18 +221,18 @@ struct CameraPreview: UIViewRepresentable {
             }
         }
 
-        private func currentVideoOrientation() -> AVCaptureVideoOrientation? {
+        private func currentVideoRotationAngle() -> CGFloat? {
             switch UIDevice.current.orientation {
             case .landscapeLeft:
-                return .landscapeRight
+                return 180
             case .landscapeRight:
-                return .landscapeLeft
+                return 0
             case .portraitUpsideDown:
-                return .portraitUpsideDown
+                return 270
             case .portrait:
-                return .portrait
+                return 90
             default:
-                return previewLayer?.connection?.videoOrientation ?? .landscapeRight
+                return previewLayer?.connection?.videoRotationAngle ?? 0
             }
         }
 
