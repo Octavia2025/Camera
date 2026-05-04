@@ -1,14 +1,11 @@
-
 import SwiftUI
 import AVFoundation
 import CoreImage
 
 // MARK: - PIECE COLOR DEFINITIONS
-// HSB ranges for each physical piece color
 struct PieceColorRange {
     let name: String
     let uiColor: Color
-    // Hue range 0–360, Saturation & Brightness 0–1
     let hueMin: CGFloat
     let hueMax: CGFloat
     let satMin: CGFloat
@@ -16,40 +13,20 @@ struct PieceColorRange {
 }
 
 let pieceColors: [PieceColorRange] = [
-    PieceColorRange(name: "T", uiColor: Color(red: 0.6, green: 0.2, blue: 0.8),
-                    hueMin: 270, hueMax: 310, satMin: 0.4, briMin: 0.3),  // Purple
-
-    PieceColorRange(name: "V", uiColor: .red,
-                    hueMin: 0,   hueMax: 15,  satMin: 0.5, briMin: 0.3),  // Red (also wraps)
-
-    PieceColorRange(name: "V_wrap", uiColor: .red,
-                    hueMin: 345, hueMax: 360, satMin: 0.5, briMin: 0.3),  // Red wrap-around
-
-    PieceColorRange(name: "U", uiColor: .pink,
-                    hueMin: 310, hueMax: 345, satMin: 0.25, briMin: 0.5), // Pink
-
-    PieceColorRange(name: "F", uiColor: .blue,
-                    hueMin: 200, hueMax: 250, satMin: 0.4, briMin: 0.2),  // Blue
-
-    PieceColorRange(name: "X", uiColor: .teal,
-                    hueMin: 165, hueMax: 200, satMin: 0.4, briMin: 0.2),  // Teal
-
-    PieceColorRange(name: "W", uiColor: .orange,
-                    hueMin: 20,  hueMax: 45,  satMin: 0.5, briMin: 0.3),  // Orange
-
-    PieceColorRange(name: "L", uiColor: .yellow,
-                    hueMin: 45,  hueMax: 75,  satMin: 0.4, briMin: 0.4),  // Yellow
-
-    PieceColorRange(name: "Z", uiColor: .green,
-                    hueMin: 90,  hueMax: 165, satMin: 0.3, briMin: 0.2),  // Green
+    PieceColorRange(name: "T", uiColor: Color(red: 0.6, green: 0.2, blue: 0.8), hueMin: 270, hueMax: 310, satMin: 0.4, briMin: 0.3),
+    PieceColorRange(name: "V", uiColor: .red, hueMin: 0, hueMax: 15, satMin: 0.5, briMin: 0.3),
+    PieceColorRange(name: "V_wrap", uiColor: .red, hueMin: 345, hueMax: 360, satMin: 0.5, briMin: 0.3),
+    PieceColorRange(name: "U", uiColor: .pink, hueMin: 310, hueMax: 345, satMin: 0.25, briMin: 0.5),
+    PieceColorRange(name: "F", uiColor: .blue, hueMin: 200, hueMax: 250, satMin: 0.4, briMin: 0.2),
+    PieceColorRange(name: "X", uiColor: .teal, hueMin: 165, hueMax: 200, satMin: 0.4, briMin: 0.2),
+    PieceColorRange(name: "W", uiColor: .orange, hueMin: 20, hueMax: 45, satMin: 0.5, briMin: 0.3),
+    PieceColorRange(name: "L", uiColor: .yellow, hueMin: 45, hueMax: 75, satMin: 0.4, briMin: 0.4),
+    PieceColorRange(name: "Z", uiColor: .green, hueMin: 90, hueMax: 165, satMin: 0.3, briMin: 0.2),
 ]
 
-// Match a hue/sat/bri to a piece name
 func matchPieceColor(hue: CGFloat, sat: CGFloat, bri: CGFloat) -> (name: String, color: Color)? {
     for range in pieceColors {
-        if hue >= range.hueMin && hue <= range.hueMax &&
-           sat >= range.satMin && bri >= range.briMin {
-            // Map "V_wrap" back to V
+        if hue >= range.hueMin && hue <= range.hueMax && sat >= range.satMin && bri >= range.briMin {
             let name = range.name == "V_wrap" ? "V" : range.name
             return (name, range.uiColor)
         }
@@ -67,13 +44,11 @@ struct CameraView: View {
 
     var body: some View {
         ZStack {
-            // Camera feed
             CameraPreview(onColor: { hue, sat, bri in
                 handleColor(hue: hue, sat: sat, bri: bri)
             })
             .ignoresSafeArea()
 
-            // Aiming box
             GeometryReader { geo in
                 let size = min(geo.size.width, geo.size.height) * 0.65
                 let cx = geo.size.width / 2
@@ -83,7 +58,6 @@ struct CameraView: View {
                 let lw: CGFloat = 4
 
                 ZStack {
-                    // Dim outside
                     Rectangle()
                         .fill(Color.black.opacity(0.45))
                         .mask(
@@ -97,35 +71,33 @@ struct CameraView: View {
                             .compositingGroup()
                         )
 
-                    // Corner TL
-                    Path { p in
-                        p.move(to: CGPoint(x: cx - half, y: cy - half + cLen))
-                        p.addLine(to: CGPoint(x: cx - half, y: cy - half))
-                        p.addLine(to: CGPoint(x: cx - half + cLen, y: cy - half))
-                    }.stroke(isLocked ? detectedColor : Color.white, lineWidth: lw)
+                    // Corner Brackets
+                    Group {
+                        Path { p in
+                            p.move(to: CGPoint(x: cx - half, y: cy - half + cLen))
+                            p.addLine(to: CGPoint(x: cx - half, y: cy - half))
+                            p.addLine(to: CGPoint(x: cx - half + cLen, y: cy - half))
+                        }.stroke(isLocked ? detectedColor : Color.white, lineWidth: lw)
 
-                    // Corner TR
-                    Path { p in
-                        p.move(to: CGPoint(x: cx + half - cLen, y: cy - half))
-                        p.addLine(to: CGPoint(x: cx + half, y: cy - half))
-                        p.addLine(to: CGPoint(x: cx + half, y: cy - half + cLen))
-                    }.stroke(isLocked ? detectedColor : Color.white, lineWidth: lw)
+                        Path { p in
+                            p.move(to: CGPoint(x: cx + half - cLen, y: cy - half))
+                            p.addLine(to: CGPoint(x: cx + half, y: cy - half))
+                            p.addLine(to: CGPoint(x: cx + half, y: cy - half + cLen))
+                        }.stroke(isLocked ? detectedColor : Color.white, lineWidth: lw)
 
-                    // Corner BL
-                    Path { p in
-                        p.move(to: CGPoint(x: cx - half, y: cy + half - cLen))
-                        p.addLine(to: CGPoint(x: cx - half, y: cy + half))
-                        p.addLine(to: CGPoint(x: cx - half + cLen, y: cy + half))
-                    }.stroke(isLocked ? detectedColor : Color.white, lineWidth: lw)
+                        Path { p in
+                            p.move(to: CGPoint(x: cx - half, y: cy + half - cLen))
+                            p.addLine(to: CGPoint(x: cx - half, y: cy + half))
+                            p.addLine(to: CGPoint(x: cx - half + cLen, y: cy + half))
+                        }.stroke(isLocked ? detectedColor : Color.white, lineWidth: lw)
 
-                    // Corner BR
-                    Path { p in
-                        p.move(to: CGPoint(x: cx + half - cLen, y: cy + half))
-                        p.addLine(to: CGPoint(x: cx + half, y: cy + half))
-                        p.addLine(to: CGPoint(x: cx + half, y: cy + half - cLen))
-                    }.stroke(isLocked ? detectedColor : Color.white, lineWidth: lw)
+                        Path { p in
+                            p.move(to: CGPoint(x: cx + half - cLen, y: cy + half))
+                            p.addLine(to: CGPoint(x: cx + half, y: cy + half))
+                            p.addLine(to: CGPoint(x: cx + half, y: cy + half - cLen))
+                        }.stroke(isLocked ? detectedColor : Color.white, lineWidth: lw)
+                    }
 
-                    // Centre crosshair
                     Path { p in
                         p.move(to: CGPoint(x: cx - 12, y: cy))
                         p.addLine(to: CGPoint(x: cx + 12, y: cy))
@@ -133,7 +105,6 @@ struct CameraView: View {
                         p.addLine(to: CGPoint(x: cx, y: cy + 12))
                     }.stroke(Color.white.opacity(0.5), lineWidth: 1.5)
 
-                    // Instruction label
                     Text("POINT AT PIECE")
                         .font(.system(size: 11, weight: .bold, design: .monospaced))
                         .foregroundColor(.white.opacity(0.75))
@@ -141,7 +112,6 @@ struct CameraView: View {
                 }
             }
 
-            // Piece name badge — shown when detected
             if detectedPiece != "Scanning..." {
                 VStack {
                     HStack(spacing: 10) {
@@ -174,32 +144,10 @@ struct CameraView: View {
                 }
                 .padding(.top, 60)
                 .frame(maxHeight: .infinity, alignment: .top)
-                .transition(.opacity)
-                .animation(.easeInOut(duration: 0.2), value: detectedPiece)
-            }
-
-            // Bottom status
-            VStack {
-                Spacer()
-                HStack(spacing: 8) {
-                    Circle()
-                        .fill(isLocked ? detectedColor : Color.white.opacity(0.35))
-                        .frame(width: 8, height: 8)
-                    Text(isLocked ? "LOCKED — \(detectedPiece)" : detectedPiece)
-                        .font(.system(size: 13, weight: .bold, design: .monospaced))
-                        .foregroundColor(isLocked ? detectedColor : .white)
-                }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 10)
-                .background(Color.black.opacity(0.7))
-                .cornerRadius(12)
-                .padding(.bottom, 48)
             }
         }
-        .animation(.easeInOut(duration: 0.15), value: isLocked)
     }
 
-    // MARK: - COLOR HANDLER
     private func handleColor(hue: CGFloat, sat: CGFloat, bri: CGFloat) {
         let result = matchPieceColor(hue: hue, sat: sat, bri: bri)
         let newPiece = result?.name ?? "Unknown"
@@ -227,8 +175,6 @@ struct CameraView: View {
 
 // MARK: - CAMERA PREVIEW
 struct CameraPreview: UIViewRepresentable {
-    typealias UIViewType = PreviewUIView
-
     var onColor: (CGFloat, CGFloat, CGFloat) -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -244,11 +190,11 @@ struct CameraPreview: UIViewRepresentable {
 
     func updateUIView(_ uiView: PreviewUIView, context: Context) { }
 
-    // MARK: - COORDINATOR
     final class Coordinator: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         var onColor: (CGFloat, CGFloat, CGFloat) -> Void
         let session = AVCaptureSession()
         var previewLayer: AVCaptureVideoPreviewLayer?
+        var videoOutput: AVCaptureVideoDataOutput?
         private var frameCount = 0
 
         init(onColor: @escaping (CGFloat, CGFloat, CGFloat) -> Void) {
@@ -256,22 +202,23 @@ struct CameraPreview: UIViewRepresentable {
         }
 
         func setupCamera(in view: UIView) {
-            guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
+            guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front),
                   let input = try? AVCaptureDeviceInput(device: device) else { return }
 
             session.beginConfiguration()
-            session.sessionPreset = .medium  // Lower res is fine for color sampling
+            session.sessionPreset = .medium
 
             if session.canAddInput(input) { session.addInput(input) }
 
             let output = AVCaptureVideoDataOutput()
-            output.videoSettings = [
-                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
-            ]
-            output.setSampleBufferDelegate(self,
-                queue: DispatchQueue(label: "camera.queue", qos: .userInitiated))
+            output.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
+            output.setSampleBufferDelegate(self, queue: DispatchQueue(label: "camera.queue", qos: .userInitiated))
 
-            if session.canAddOutput(output) { session.addOutput(output) }
+            if session.canAddOutput(output) {
+                session.addOutput(output)
+                self.videoOutput = output
+            }
+            
             session.commitConfiguration()
 
             let preview = AVCaptureVideoPreviewLayer(session: session)
@@ -284,14 +231,35 @@ struct CameraPreview: UIViewRepresentable {
             }
         }
 
-        func captureOutput(_ output: AVCaptureOutput,
-                           didOutput sampleBuffer: CMSampleBuffer,
-                           from connection: AVCaptureConnection) {
+        func updateOrientation() {
+            guard let previewLayer = previewLayer else { return }
+            
+            let deviceOrientation = UIDevice.current.orientation
+            let videoOrientation: AVCaptureVideoOrientation
+            
+            switch deviceOrientation {
+            case .portrait: videoOrientation = .portrait
+            case .landscapeLeft: videoOrientation = .landscapeRight
+            case .landscapeRight: videoOrientation = .landscapeLeft
+            case .portraitUpsideDown: videoOrientation = .portraitUpsideDown
+            default: return
+            }
 
-            // Sample every 3rd frame for performance
+            // 1. Update Preview visuals
+            if previewLayer.connection?.isVideoOrientationSupported == true {
+                previewLayer.connection?.videoOrientation = videoOrientation
+            }
+
+            // 2. Update Data output buffer orientation
+            if let outputConnection = videoOutput?.connection(with: .video),
+               outputConnection.isVideoOrientationSupported {
+                outputConnection.videoOrientation = videoOrientation
+            }
+        }
+
+        func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
             frameCount += 1
             guard frameCount % 3 == 0 else { return }
-
             guard let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
             CVPixelBufferLockBaseAddress(imageBuffer, .readOnly)
@@ -299,31 +267,24 @@ struct CameraPreview: UIViewRepresentable {
 
             let width = CVPixelBufferGetWidth(imageBuffer)
             let height = CVPixelBufferGetHeight(imageBuffer)
-
-            guard let baseAddress = CVPixelBufferGetBaseAddress(imageBuffer) else { return }
             let bytesPerRow = CVPixelBufferGetBytesPerRow(imageBuffer)
+            guard let baseAddress = CVPixelBufferGetBaseAddress(imageBuffer) else { return }
+            
             let buffer = baseAddress.assumingMemoryBound(to: UInt8.self)
 
-            // Sample a 20x20 patch from the centre of the frame
-            // This matches where the aiming box crosshair is
             let sampleSize = 20
             let startX = width / 2 - sampleSize / 2
             let startY = height / 2 - sampleSize / 2
 
-            var totalR: CGFloat = 0
-            var totalG: CGFloat = 0
-            var totalB: CGFloat = 0
+            var totalR: CGFloat = 0, totalG: CGFloat = 0, totalB: CGFloat = 0
             var count: CGFloat = 0
 
             for y in startY..<(startY + sampleSize) {
                 for x in startX..<(startX + sampleSize) {
                     let offset = y * bytesPerRow + x * 4
-                    let b = CGFloat(buffer[offset])     / 255.0
-                    let g = CGFloat(buffer[offset + 1]) / 255.0
-                    let r = CGFloat(buffer[offset + 2]) / 255.0
-                    totalR += r
-                    totalG += g
-                    totalB += b
+                    totalB += CGFloat(buffer[offset]) / 255.0
+                    totalG += CGFloat(buffer[offset + 1]) / 255.0
+                    totalR += CGFloat(buffer[offset + 2]) / 255.0
                     count += 1
                 }
             }
@@ -332,15 +293,9 @@ struct CameraPreview: UIViewRepresentable {
             let avgG = totalG / count
             let avgB = totalB / count
 
-            // Convert RGB to HSB
-            var hue: CGFloat = 0
-            var sat: CGFloat = 0
-            var bri: CGFloat = 0
-            UIColor(red: avgR, green: avgG, blue: avgB, alpha: 1.0)
-                .getHue(&hue, saturation: &sat, brightness: &bri, alpha: nil)
-
-            // Convert hue from 0–1 to 0–360
-            onColor(hue * 360, sat, bri)
+            var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0
+            UIColor(red: avgR, green: avgG, blue: avgB, alpha: 1.0).getHue(&h, saturation: &s, brightness: &b, alpha: nil)
+            onColor(h * 360, s, b)
         }
     }
 }
@@ -352,6 +307,7 @@ class PreviewUIView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         coordinator?.previewLayer?.frame = bounds
+        coordinator?.updateOrientation()
     }
 }
 
